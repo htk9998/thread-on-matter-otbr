@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matter over Thread Study Guide — 사양·아키텍처·OTBR·Espressif 구현</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --ink: #1a2332; --sub: #5a6b85;
+    --accent: #1F497D; --accent2: #2d6cb5; --line: #dde3ec;
+    --code-bg: #f0f3f8; --warn-bg: #fff7e8; --warn-line: #e8b84d;
+    --ok-bg: #eef8f0; --ok-line: #5cb87a; --th-bg: #eef2f8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Malgun Gothic", "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--ink); line-height: 1.7; font-size: 15px; }
+  header { background: linear-gradient(135deg, #16365c, #1F497D 60%, #2d6cb5);
+           color: #fff; padding: 36px 24px 28px; }
+  header h1 { margin: 0 0 6px; font-size: 26px; }
+  header p { margin: 0; opacity: .85; font-size: 14px; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 80px; }
+  nav.toc { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+            padding: 18px 22px; margin-bottom: 28px; }
+  nav.toc b { color: var(--accent); }
+  nav.toc ol { margin: 8px 0 0; padding-left: 22px; columns: 2; }
+  nav.toc a { color: var(--accent2); text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+            padding: 24px 28px; margin-bottom: 26px; }
+  h2 { color: var(--accent); font-size: 20px; border-bottom: 2px solid var(--accent);
+       padding-bottom: 8px; margin-top: 4px; }
+  h3 { color: var(--accent2); font-size: 16px; margin-bottom: 6px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--th-bg); color: var(--accent); }
+  code, pre { font-family: Consolas, "D2Coding", monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+  pre { background: #0f1b2d; color: #d5e3f5; padding: 14px 16px; border-radius: 8px;
+        overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre .c { color: #7fa3cc; }
+  .box { border-left: 4px solid var(--warn-line); background: var(--warn-bg);
+         padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 12px 0; }
+  .box.ok { border-left-color: var(--ok-line); background: var(--ok-bg); }
+  .diagram { background: #0f1b2d; color: #9fc3ee; padding: 16px 18px; border-radius: 8px;
+             overflow-x: auto; font-family: Consolas, monospace; font-size: 13px;
+             line-height: 1.5; white-space: pre; }
+  .tag { display: inline-block; background: var(--accent); color: #fff; border-radius: 4px;
+         padding: 1px 9px; font-size: 12px; margin-right: 6px; }
+  footer { text-align: center; color: var(--sub); font-size: 12px; padding: 16px;
+           border-top: 1px solid var(--line); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } nav.toc ol { columns: 1; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Matter 프로토콜 Study Guide</h1>
+  <p>전체 사양 · 아키텍처 · 커미셔닝/보안 · Thread 보더라우터(OTBR) · Espressif 구현 (2026-10)</p>
+</header>
+
+<div class="wrap">
+
+<nav class="toc">
+  <b>목차</b>
+  <ol>
+    <li><a href="#s1">Matter란 무엇인가</a></li>
+    <li><a href="#s2">프로토콜 스택 구조</a></li>
+    <li><a href="#s3">데이터 모델 (Node/Endpoint/Cluster)</a></li>
+    <li><a href="#s4">핵심 클러스터 상세 (조명)</a></li>
+    <li><a href="#s5">커미셔닝 (장치 등록 절차)</a></li>
+    <li><a href="#s6">보안 모델 (인증서 체계)</a></li>
+    <li><a href="#s7">Matter over Thread & 보더라우터</a></li>
+    <li><a href="#s8">Espressif 구현 (esp-matter)</a></li>
+    <li><a href="#s10">테스트 환경 구축 절차</a></li>
+    <li><a href="#s11">용어집 & 참고 링크</a></li>
+  </ol>
+</nav>
+
+<!-- ───────────────────────── 1 ───────────────────────── -->
+<section id="s1">
+  <h2>1. Matter란 무엇인가</h2>
+  <p><b>Matter</b>는 CSA(Connectivity Standards Alliance, 구 Zigbee Alliance)가 주도하고
+  Apple·Google·Amazon·Samsung 등이 공동 개발한 <b>스마트홈 표준 응용 프로토콜</b>이다.
+  2022년 10월 1.0 발표 이후 매년 2회(봄/가을) 버전이 갱신된다.</p>
+
+  <h3>탄생 배경 — 무엇을 해결하나</h3>
+  <table>
+    <tr><th>기존 문제</th><th>Matter의 해법</th></tr>
+    <tr><td>생태계 파편화 — HomeKit/Google/Alexa/SmartThings 별로 따로 인증·개발</td>
+        <td><b>하나의 기기가 모든 생태계에서 동작</b> (멀티 어드민: 한 기기를 여러 생태계에 동시 등록)</td></tr>
+    <tr><td>클라우드 의존 — 인터넷 끊기면 제어 불가, 응답 지연</td>
+        <td><b>로컬 IPv6 통신 우선</b> — 같은 네트워크 안에서 직접 제어</td></tr>
+    <tr><td>프로토콜 난립 (Zigbee/Z-Wave/BLE/독자 RF)</td>
+        <td>전송 계층을 <b>IP 기반(Wi-Fi/Thread/Ethernet)</b>으로 통일</td></tr>
+    <tr><td>보안 수준 제각각</td>
+        <td>기기마다 <b>공장 주입 인증서(DAC)</b> 의무 — 위조 기기 차단</td></tr>
+  </table>
+
+  <h3>버전 히스토리 (주요)</h3>
+  <table>
+    <tr><th>버전</th><th>시기</th><th>주요 추가</th></tr>
+    <tr><td>1.0</td><td>2022.10</td><td>조명, 스위치, 플러그, 센서, 도어락, 커튼, 온도조절기, 미디어 등 최초 디바이스 타입</td></tr>
+    <tr><td>1.2</td><td>2023.10</td><td>가전 확장 — 냉장고, 세탁기, 식기세척기, 로봇청소기, 공기청정기 등</td></tr>
+    <tr><td>1.3</td><td>2024.05</td><td>에너지 관리(EV 충전기), 전자레인지/오븐, 물 관리</td></tr>
+    <tr><td>1.4</td><td>2024.11</td><td>배터리 저장장치, 히트펌프, 태양광, 라우터/액세스포인트(HRAP), Enhanced Multi-Admin</td></tr>
+  </table>
+
+  <div class="box ok"><b>참고:</b> 조명(Dimmable/Color Temperature Light)은 1.0부터 완전 지원되는
+  가장 성숙한 카테고리다. ON/OFF·CCT·DIM 제어는 모두 표준 클러스터로 커버된다.</div>
+</section>
+
+<!-- ───────────────────────── 2 ───────────────────────── -->
+<section id="s2">
+  <h2>2. 프로토콜 스택 구조</h2>
+  <p>Matter는 <b>응용 계층 표준</b>이다. 자체 무선 기술이 아니라, 기존 IP 네트워크 위에 올라간다.</p>
+
+  <div class="diagram">┌─────────────────────────────────────────────────────┐
+│  Application        조명·스위치 등 디바이스 로직    │
+├─────────────────────────────────────────────────────┤
+│  Data Model         Node / Endpoint / Cluster /     │
+│                     Attribute / Command / Event     │
+├─────────────────────────────────────────────────────┤
+│  Interaction Model  Read / Write / Invoke /         │
+│                     Subscribe (구독·보고)           │
+├─────────────────────────────────────────────────────┤
+│  Security           PASE / CASE 세션, AES-CCM 암호화│
+├─────────────────────────────────────────────────────┤
+│  Transport          TCP / UDP (+ MRP 신뢰성 계층)   │
+├─────────────────────────────────────────────────────┤
+│  Network            IPv6  ← 반드시 IPv6             │
+├─────────────────────────────────────────────────────┤
+│  Link               Wi-Fi │ Thread(802.15.4) │ Eth  │
+│                     (BLE는 커미셔닝 전용)           │
+└─────────────────────────────────────────────────────┘</div>
+
+  <h3>전송 수단별 역할</h3>
+  <table>
+    <tr><th>링크</th><th>용도</th><th>특징</th></tr>
+    <tr><td><b>Wi-Fi</b></td><td>운영 트래픽</td><td>대역폭 큼, 전력 소모 큼 — 상시전원 기기(가전, 허브)</td></tr>
+    <tr><td><b>Thread</b></td><td>운영 트래픽</td><td>802.15.4 기반 저전력 IPv6 메시 — 조명·센서·배터리 기기. <b>보더라우터 필수</b></td></tr>
+    <tr><td><b>Ethernet</b></td><td>운영 트래픽</td><td>허브·브리지류</td></tr>
+    <tr><td><b>BLE</b></td><td><u>커미셔닝 전용</u></td><td>최초 등록 시에만 사용. 등록 후 BLE는 꺼짐 (운영 통신에 사용 안 함)</td></tr>
+  </table>
+
+  <div class="box"><b>흔한 오해:</b> "Matter 기기는 BLE로 제어된다" — ✕.
+  BLE는 Wi-Fi 비밀번호/Thread 네트워크 키를 안전하게 넘겨주는 <b>최초 등록 통로</b>일 뿐이며,
+  이후 모든 제어는 IPv6 (Wi-Fi 또는 Thread) 위에서 이뤄진다.</div>
+</section>
+
+<!-- ───────────────────────── 3 ───────────────────────── -->
+<section id="s3">
+  <h2>3. 데이터 모델 — Node / Endpoint / Cluster</h2>
+  <p>Matter 기기의 기능은 계층형 데이터 모델로 표현된다. Zigbee ZCL을 계승·확장한 구조다.</p>
+
+  <div class="diagram">Node (기기 1대 = Matter 노드, Node ID 보유)
+ ├─ Endpoint 0  ← 필수. 기기 관리용 (Basic Information,
+ │               Network Commissioning, OTA 등 유틸리티 클러스터)
+ ├─ Endpoint 1  ← 실제 기능 ①  예: Dimmable Light
+ │    ├─ Cluster: On/Off        (0x0006)
+ │    ├─ Cluster: Level Control (0x0008)
+ │    └─ Cluster: Color Control (0x0300)
+ └─ Endpoint 2  ← 실제 기능 ② (한 기기에 여러 기능 가능)</div>
+
+  <table>
+    <tr><th>개념</th><th>정의</th><th>예시</th></tr>
+    <tr><td><b>Node</b></td><td>네트워크상 Matter 기기 1대. 커미셔닝 단위</td><td>Matter 조명 기기 1대</td></tr>
+    <tr><td><b>Endpoint</b></td><td>노드 안의 기능 단위. Device Type이 부여됨</td><td>EP1 = Color Temperature Light</td></tr>
+    <tr><td><b>Cluster</b></td><td>기능 블록 (속성+커맨드+이벤트의 묶음). Server(기능 보유)/Client(제어측) 역할 구분</td><td>On/Off 클러스터</td></tr>
+    <tr><td><b>Attribute</b></td><td>클러스터의 상태값. 읽기/쓰기/구독 가능</td><td><code>OnOff</code>(bool), <code>CurrentLevel</code>(0~254)</td></tr>
+    <tr><td><b>Command</b></td><td>클러스터에 내리는 동작 요청</td><td><code>Toggle</code>, <code>MoveToLevel</code></td></tr>
+    <tr><td><b>Event</b></td><td>시점 기록이 중요한 사건 로그</td><td>스위치 눌림, 재부팅</td></tr>
+  </table>
+
+  <h3>Device Type (조명 관련)</h3>
+  <table>
+    <tr><th>Device Type</th><th>ID</th><th>필수 클러스터</th></tr>
+    <tr><td>On/Off Light</td><td>0x0100</td><td>On/Off</td></tr>
+    <tr><td>Dimmable Light</td><td>0x0101</td><td>On/Off + Level Control</td></tr>
+    <tr><td><b>Color Temperature Light</b></td><td>0x010C</td><td>On/Off + Level Control + Color Control(CT 모드)</td></tr>
+    <tr><td>Extended Color Light</td><td>0x010D</td><td>위 + 색상(HSV/XY)</td></tr>
+  </table>
+  <div class="box ok"><b>선택 기준:</b> ON/OFF + DIM + CCT 조명이면 <b>Color Temperature Light (0x010C)</b>가 맞는 타입.</div>
+</section>
+
+<!-- ───────────────────────── 4 ───────────────────────── -->
+<section id="s4">
+  <h2>4. 핵심 클러스터 상세 (조명 3종)</h2>
+
+  <h3>4.1 On/Off Cluster (0x0006)</h3>
+  <table>
+    <tr><th>구분</th><th>이름</th><th>설명</th></tr>
+    <tr><td>Attribute</td><td><code>OnOff</code> (bool)</td><td>현재 점등 상태</td></tr>
+    <tr><td rowspan="3">Command</td><td><code>On</code> / <code>Off</code></td><td>점등 / 소등</td></tr>
+    <tr><td><code>Toggle</code></td><td>반전</td></tr>
+    <tr><td><code>OffWithEffect</code> 등</td><td>페이드 효과 소등 (옵션)</td></tr>
+  </table>
+
+  <h3>4.2 Level Control Cluster (0x0008) — 밝기(DIM)</h3>
+  <table>
+    <tr><th>구분</th><th>이름</th><th>설명</th></tr>
+    <tr><td>Attribute</td><td><code>CurrentLevel</code></td><td><b>0~254</b> (254=100%). null 가능</td></tr>
+    <tr><td rowspan="2">Command</td><td><code>MoveToLevel</code>(level, transitionTime)</td><td>지정 밝기로 (전환시간 0.1s 단위)</td></tr>
+    <tr><td><code>MoveToLevelWithOnOff</code></td><td>레벨 이동 + 0이면 Off / &gt;0이면 On 연동</td></tr>
+  </table>
+
+  <h3>4.3 Color Control Cluster (0x0300) — 색온도(CCT)</h3>
+  <table>
+    <tr><th>구분</th><th>이름</th><th>설명</th></tr>
+    <tr><td rowspan="3">Attribute</td><td><code>ColorTemperatureMireds</code></td><td>현재 색온도. <b>단위 = Mired</b></td></tr>
+    <tr><td><code>ColorTempPhysicalMinMireds</code></td><td>지원 최소 Mired (= 최대 K)</td></tr>
+    <tr><td><code>ColorTempPhysicalMaxMireds</code></td><td>지원 최대 Mired (= 최소 K)</td></tr>
+    <tr><td>Command</td><td><code>MoveToColorTemperature</code>(mireds, tt)</td><td>지정 색온도로</td></tr>
+  </table>
+
+  <div class="box"><b>⚠ Mired 변환 (실수 1순위):</b> <code>Mired = 1,000,000 / Kelvin</code> — <b>역수 관계라 방향이 반대</b>다.<br>
+  6500 K(주광) = 154 mired, 5000 K = 200 mired, 3500 K(전구) = 286 mired, 2700 K = 370 mired.<br>
+  즉 Mired가 <u>작을수록</u> 차가운 빛. 자체 CCT 스케일(예: 0~1000)로 변환할 때 반드시 뒤집어서 매핑할 것.</div>
+</section>
+
+<!-- ───────────────────────── 5 ───────────────────────── -->
+<section id="s5">
+  <h2>5. 커미셔닝 — 장치 등록 절차</h2>
+  <p>커미셔닝은 새 기기를 사용자의 <b>Fabric</b>(하나의 생태계가 관리하는 보안 도메인)에 편입시키는 절차다.</p>
+
+  <div class="diagram">[폰/chip-tool = 커미셔너]                [신규 기기 = 커미셔니]
+        │                                      │ ① BLE 광고 (discriminator 포함)
+        │ ② QR코드/숫자코드 입력               │
+        │──── BLE 연결 ───────────────────────▶│
+        │ ③ PASE: 패스코드 기반 보안세션(SPAKE2+)
+        │ ④ 기기 인증서(DAC) 검증 ─ 정품 확인
+        │ ⑤ NOC(운영 인증서) 발급 ─ Fabric 편입
+        │ ⑥ 네트워크 자격증명 전달
+        │     Wi-Fi: SSID/PW │ Thread: Dataset(네트워크 키)
+        │                                      │ ⑦ Wi-Fi/Thread 접속, IPv6 획득
+        │ ⑧ CASE: 운영 보안세션 수립 (mDNS로 발견)
+        │◀──── 이후 모든 제어는 IP 위에서 ────▶│</div>
+
+  <h3>온보딩 코드 구성요소</h3>
+  <table>
+    <tr><th>요소</th><th>값 예 (테스트 기본값)</th><th>역할</th></tr>
+    <tr><td>Setup Passcode</td><td><code>20202021</code></td><td>PASE 세션 수립용 비밀값 (27bit)</td></tr>
+    <tr><td>Discriminator</td><td><code>3840</code></td><td>BLE 광고 중 기기 구분용 12bit 값</td></tr>
+    <tr><td>QR 코드</td><td><code>MT:Y.K9042C00KA0648G00</code></td><td>VID/PID/패스코드/디스크리미네이터 인코딩</td></tr>
+    <tr><td>수동 페어링 코드</td><td><code>34970112332</code></td><td>QR 못 읽는 경우 11자리 숫자</td></tr>
+  </table>
+
+  <h3>멀티 어드민 (Multi-Admin)</h3>
+  <p>등록된 기기에 <code>OpenCommissioningWindow</code>를 열면 <b>다른 생태계(Fabric)에도 추가 등록</b>이
+  가능하다 (최대 5 Fabric). 예: Google Home에 등록한 조명을 Apple Home에서도 동시 제어.
+  각 Fabric은 독립된 NOC를 가지므로 상호 간섭이 없다.</p>
+
+  <div class="box"><b>⚠ 테스트 vs 양산:</b> 위 기본값(20202021/3840)과 테스트 VID <code>0xFFF1</code>은 개발 전용이다.
+  양산 시에는 CSA에서 Vendor ID를 발급받고, 기기마다 고유한 패스코드/QR을 <code>esp-matter-mfg-tool</code>로 생성해
+  factory 파티션에 구워야 하며, 생태계 앱에서 정식 인식되려면 CSA 인증 + DCL 등재가 필요하다.</div>
+</section>
+
+<!-- ───────────────────────── 6 ───────────────────────── -->
+<section id="s6">
+  <h2>6. 보안 모델 — 인증서 체계</h2>
+
+  <h3>기기 인증 (Device Attestation) — "정품인가?"</h3>
+  <div class="diagram">PAA (Product Attestation Authority)   ← CSA가 관리하는 루트 CA
+  └─ PAI (Product Attestation Intermediate) ← 제조사 중간 인증서
+       └─ DAC (Device Attestation Certificate) ← 기기 1대 1장, 공장 주입
+            + CD (Certification Declaration)   ← CSA 인증 통과 증명</div>
+  <p>커미셔닝 ④단계에서 커미셔너가 DAC 체인을 검증한다. 개발 중에는 SDK에 내장된
+  테스트 인증서가 쓰이고, 양산 시 Espressif의 사전 프로비저닝 모듈을 쓰거나 자체 PAI를 발급받는다.</p>
+
+  <h3>운영 보안</h3>
+  <table>
+    <tr><th>요소</th><th>내용</th></tr>
+    <tr><td><b>PASE</b></td><td>커미셔닝 시 패스코드 기반 임시 세션 (SPAKE2+ — 패스코드가 평문으로 안 흐름)</td></tr>
+    <tr><td><b>CASE</b></td><td>운영 단계 상호 인증 세션 — 양쪽 NOC 교환·검증 (Sigma 프로토콜)</td></tr>
+    <tr><td><b>NOC</b></td><td>Node Operational Certificate — Fabric 소속 증명. Fabric마다 1장</td></tr>
+    <tr><td><b>암호화</b></td><td>모든 운영 메시지 AES-128-CCM. 세션키는 CASE에서 유도</td></tr>
+    <tr><td><b>ACL</b></td><td>Access Control List — 어느 노드가 어떤 클러스터에 접근 가능한지 기기측에서 통제</td></tr>
+  </table>
+</section>
+
+<!-- ───────────────────────── 7 ───────────────────────── -->
+<section id="s7">
+  <h2>7. Matter over Thread & 보더라우터</h2>
+
+  <h3>Thread 네트워크 기초</h3>
+  <table>
+    <tr><th>항목</th><th>내용</th></tr>
+    <tr><td>물리계층</td><td>IEEE 802.15.4, 2.4 GHz (Zigbee와 동일 PHY — 프로토콜은 다름)</td></tr>
+    <tr><td>네트워크</td><td><b>IPv6 저전력 메시</b> (6LoWPAN 압축). 자가 복구 라우팅</td></tr>
+    <tr><td>노드 역할</td><td>Router(중계 가능, 상시전원) / End Device / <b>SED</b>(Sleepy End Device, 배터리) / Leader(자동 선출)</td></tr>
+    <tr><td>자격증명</td><td><b>Thread Dataset</b> — 네트워크 키·채널·PAN ID 묶음. 커미셔닝 때 BLE로 전달됨</td></tr>
+    <tr><td>장점</td><td>저전력 (SED 배터리 수년), 메시 확장성, Wi-Fi 혼잡과 분리, 조명 다수 설치에 적합</td></tr>
+  </table>
+
+  <h3>보더라우터(OTBR)와 RCP</h3>
+  <p>Thread 메시는 자체로는 섬이다. 폰/허브가 있는 Wi-Fi/Ethernet 네트워크와 잇는 장치가
+  <b>Thread Border Router</b>이며, 라우팅·mDNS 중계·(필요시) NAT64를 수행한다.</p>
+  <div class="diagram">[Matter 조명들] ~~Thread 메시~~ [RCP: H2/C6] ─UART/USB(Spinel)─ [호스트: 리눅스 or ESP32-S3]
+                                                                  │ otbr-agent (Thread 스택 실행)
+                                                             Wi-Fi/Ethernet ── 공유기 ── 폰/허브</div>
+  <table>
+    <tr><th>구조</th><th>라디오</th><th>Thread 스택</th><th>비고</th></tr>
+    <tr><td>SoC</td><td>칩</td><td>칩</td><td>H2 단독 Thread 노드 (엔드 디바이스)</td></tr>
+    <tr><td><b>RCP</b></td><td>칩 (802.15.4 송수신만)</td><td><b>호스트</b></td><td>보더라우터 표준 구조. 호스트↔칩은 Spinel 프로토콜</td></tr>
+  </table>
+
+  <h3>보더라우터 구축 선택지</h3>
+  <table>
+    <tr><th>방식</th><th>구성</th><th>적합</th></tr>
+    <tr><td><b>Raspberry Pi + RCP</b> (본 저장소)</td><td>H2/C6에 <code>ot_rcp</code> 펌웨어 → Pi USB 연결, <code>ot-br-posix</code>(Docker) 실행</td><td>개발 — chip-tool·HA·로그를 한 장비에서</td></tr>
+    <tr><td>ESP Thread BR</td><td>ESP32-S3(호스트) + H2(RCP), <code>esp-thread-br</code> SDK — 리눅스 불필요</td><td>고객 데모 — Espressif 칩만으로 풀스택</td></tr>
+    <tr><td>상용 허브</td><td>Apple TV 4K / HomePod / Nest Hub 2 / Echo 4 — BR 내장</td><td>생태계 연동 확인</td></tr>
+  </table>
+</section>
+
+<!-- ───────────────────────── 8 ───────────────────────── -->
+<section id="s8">
+  <h2>8. Espressif 구현 — esp-matter SDK</h2>
+
+  <h3>칩 포지셔닝</h3>
+  <table>
+    <tr><th>칩</th><th>무선</th><th>Matter 역할</th></tr>
+    <tr><td><b>ESP32-C6</b></td><td>Wi-Fi 6 + BLE + 802.15.4</td><td>Wi-Fi Matter / <b>Thread Matter 겸용</b> — 테스트에 최적</td></tr>
+    <tr><td><b>ESP32-H2</b></td><td>BLE + 802.15.4 (Wi-Fi 없음)</td><td>Thread Matter 엔드 디바이스, RCP</td></tr>
+    <tr><td>ESP32-C5</td><td>Wi-Fi 6 듀얼밴드 + BLE + 802.15.4</td><td>C6 상위 (5 GHz 추가)</td></tr>
+    <tr><td>ESP32-S3 등</td><td>Wi-Fi + BLE</td><td>Wi-Fi Matter, Thread BR 호스트</td></tr>
+  </table>
+
+  <h3>SDK 구조와 설치</h3>
+  <table>
+    <tr><th>구성요소</th><th>내용</th></tr>
+    <tr><td><code>esp-matter</code></td><td>Espressif 상위 SDK — 간결한 C++ API, 예제(light, switch, bridge…), mfg_tool</td></tr>
+    <tr><td><code>connectedhomeip</code></td><td>CSA 공식 Matter 구현체 (esp-matter의 서브모듈). GN/ninja 빌드</td></tr>
+    <tr><td><code>chip-tool</code></td><td>호스트용 커미셔너/제어 CLI — <code>install.sh</code> 시 함께 빌드됨</td></tr>
+  </table>
+
+  <div class="box"><b>⚠ 호스트 OS:</b> esp-matter/CHIP 빌드는 <b>Linux·macOS 전용</b> (bash 스크립트·GN·호스트툴 전제).
+  Windows에서는 <b>WSL2</b>에 ESP-IDF를 별도 설치해 빌드하고, .bin은 Windows esptool로 플래싱하는 절충이 실용적.
+  chip-tool은 BLE 때문에 Pi5에서 돌리는 게 가장 깔끔하다.</div>
+
+<pre><span class="c"># WSL2(Ubuntu) — esp-matter 셋업 (shallow clone)</span>
+cd esp-idf && source ./export.sh && cd ..
+git clone --depth 1 https://github.com/espressif/esp-matter.git
+cd esp-matter && git submodule update --init --depth 1
+cd connectedhomeip/connectedhomeip
+./scripts/checkout_submodules.py --platform esp32 linux --shallow
+cd ../.. && ./install.sh && cd ..
+
+<span class="c"># Light 예제 — C6 Thread 모드 빌드</span>
+cd esp-matter/examples/light
+idf.py set-target esp32c6
+idf.py menuconfig   <span class="c"># OPENTHREAD_ENABLED=y, ENABLE_WIFI_STATION=n, USE_MINIMAL_MDNS=n</span>
+idf.py build</pre>
+
+  <h3>esp-matter 앱 코드 골격 (콜백 중심)</h3>
+<pre><span class="c">/* 속성이 바뀔 때마다 호출 — 여기서 실제 HW(또는 UART)를 구동 */</span>
+static esp_err_t app_attribute_update_cb(attribute::callback_type_t type,
+        uint16_t endpoint_id, uint32_t cluster_id,
+        uint32_t attribute_id, esp_matter_attr_val_t *val, void *priv)
+{
+    if (type != attribute::PRE_UPDATE) return ESP_OK;
+
+    if (cluster_id == OnOff::Id && attribute_id == OnOff::Attributes::OnOff::Id) {
+        bool on = val->val.b;                 <span class="c">// → UART: 0x11 / 0x10</span>
+    } else if (cluster_id == LevelControl::Id) {
+        uint8_t level = val->val.u8;          <span class="c">// 0~254 → DIM 단계 변환</span>
+    } else if (cluster_id == ColorControl::Id) {
+        uint16_t mireds = val->val.u16;       <span class="c">// Mired → K → CCT 스케일</span>
+    }
+    return ESP_OK;
+}
+
+void app_main() {
+    node::config_t node_config;
+    node_t *node = node::create(&node_config, app_attribute_update_cb, NULL);
+
+    color_temperature_light::config_t light_config;  <span class="c">// Device Type 0x010C</span>
+    endpoint_t *ep = color_temperature_light::create(node, &light_config,
+                                                     ENDPOINT_FLAG_NONE, NULL);
+    esp_matter::start(app_event_cb);
+}</pre>
+</section>
+
+<!-- ───────────────────────── 9 ───────────────────────── -->
+<section id="s10">
+  <h2>9. 테스트 환경 구축 절차</h2>
+
+  <div class="diagram">[C6: Matter Light (Thread)] ~~802.15.4~~ [H2: ot_rcp] ─USB─ [PocketTerm35(Pi5): OTBR + chip-tool]
+      Thread 엔드 디바이스                      RCP 동글              보더라우터+커미셔너</div>
+
+  <h3>단계별 체크리스트</h3>
+  <table>
+    <tr><th>단계</th><th>작업</th><th>환경</th></tr>
+    <tr><td>1</td><td>H2에 <code>esp-idf/examples/openthread/ot_rcp</code> 플래시 → Pi5에 USB 연결</td><td>Windows IDF로 가능</td></tr>
+    <tr><td>2</td><td>Pi5에 OTBR 실행:<br><code>docker run --net=host --privileged -v /dev/ttyACM0:/dev/radio openthread/otbr --radio-url spinel+hdlc+uart:///dev/radio</code><br>→ 웹 UI(:80)에서 Thread 네트워크 Form → <b>Active Dataset(hex) 복사</b></td><td>Pi5</td></tr>
+    <tr><td>3</td><td>WSL2 + esp-matter로 light 예제 C6 빌드 (Thread 모드) → Windows esptool로 플래시</td><td>WSL2 + Windows</td></tr>
+    <tr><td>4</td><td>Pi5에서 커미셔닝:<br><code>chip-tool pairing ble-thread 0x7283 hex:&lt;dataset&gt; 20202021 3840</code></td><td>Pi5</td></tr>
+    <tr><td>5</td><td>제어 확인:<br><code>chip-tool onoff toggle 0x7283 1</code><br><code>chip-tool levelcontrol move-to-level 128 0 0 0 0x7283 1</code><br><code>chip-tool colorcontrol move-to-color-temperature 250 0 0 0 0x7283 1</code></td><td>Pi5</td></tr>
+    <tr><td>6</td><td>C6 콜백에 UART 출력 추가 → UART 수신 확인 (게이트웨이/제어보드 연동 PoC)</td><td>WSL2 빌드</td></tr>
+  </table>
+
+  <h3>자주 겪는 문제</h3>
+  <table>
+    <tr><th>증상</th><th>원인/해법</th></tr>
+    <tr><td>빌드 에러 (서브모듈)</td><td><code>git submodule update --init --recursive</code>, build/·sdkconfig 삭제 후 재빌드</td></tr>
+    <tr><td>커미셔닝 실패</td><td>dataset hex 재확인, 기기 <code>idf.py erase_flash</code> 후 재시도, BLE 켜짐 확인</td></tr>
+    <tr><td>커미셔닝 후 제어 불가</td><td>Pi5와 Thread 메시 IPv6 라우팅 — OTBR 로그 확인, 같은 L2에서 mDNS 동작 확인</td></tr>
+    <tr><td>C6에서 Thread 모드 안 뜸</td><td>menuconfig 3종 세트 확인: OT=y, WiFi STA=n, MINIMAL_MDNS=n</td></tr>
+  </table>
+</section>
+
+<!-- ───────────────────────── 10 ───────────────────────── -->
+<section id="s11">
+  <h2>10. 용어집 & 참고 링크</h2>
+  <table>
+    <tr><th>용어</th><th>뜻</th></tr>
+    <tr><td>CSA</td><td>Connectivity Standards Alliance — Matter 표준화 단체 (구 Zigbee Alliance)</td></tr>
+    <tr><td>Fabric</td><td>하나의 관리 주체(생태계)가 꾸리는 보안 도메인. 기기는 최대 5개 Fabric 동시 가입</td></tr>
+    <tr><td>Commissioner / Commissionee</td><td>등록시키는 쪽(폰, chip-tool) / 등록되는 기기</td></tr>
+    <tr><td>PASE / CASE</td><td>패스코드 기반 커미셔닝 세션 / 인증서 기반 운영 세션</td></tr>
+    <tr><td>DAC·PAI·PAA</td><td>기기·제조사·루트 인증서 (정품 증명 체인)</td></tr>
+    <tr><td>NOC</td><td>Fabric 가입 후 발급되는 운영 인증서</td></tr>
+    <tr><td>OTBR / RCP</td><td>OpenThread Border Router / 라디오 전담 보조 칩 (Spinel로 호스트와 통신)</td></tr>
+    <tr><td>Mired</td><td>1,000,000/K — Matter의 색온도 단위 (K와 역수 관계)</td></tr>
+    <tr><td>DCL</td><td>Distributed Compliance Ledger — 인증 기기 공개 원장 (생태계가 조회)</td></tr>
+    <tr><td>Bridge</td><td>비-Matter 기기(Zigbee 등)를 Matter 노드로 노출하는 변환 장치</td></tr>
+  </table>
+
+  <h3>참고 링크</h3>
+  <ul>
+    <li>esp-matter 공식 문서 (C6): <code>docs.espressif.com/projects/esp-matter/en/latest/esp32c6/</code></li>
+    <li>esp-matter GitHub: <code>github.com/espressif/esp-matter</code></li>
+    <li>connectedhomeip (CSA): <code>github.com/project-chip/connectedhomeip</code></li>
+    <li>ESP Thread BR: <code>github.com/espressif/esp-thread-br</code> / OTBR: <code>openthread.io/guides/border-router</code></li>
+    <li>Matter 사양서 다운로드: <code>csa-iot.org/developer-resource/specifications-download-request/</code></li>
+    <li>QR 생성/해석: <code>project-chip.github.io/connectedhomeip/qrcode.html</code></li>
+  </ul>
+</section>
+
+<footer>
+  thread-on-matter-otbr — Matter Study Guide · 작성 2026-10-12 · 기준: Matter 1.4 / esp-matter (ESP-IDF v5.x)
+</footer>
+
+</div>
+</body>
+</html>
