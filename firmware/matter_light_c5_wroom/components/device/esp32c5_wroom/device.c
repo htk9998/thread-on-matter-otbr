@@ -5,17 +5,28 @@
 #include <button_gpio.h>
 #include <driver/gpio.h>
 #include <led_driver.h>
+#include <device.h>
 
-#define LED_GPIO_PIN    GPIO_NUM_8   /* LEDC PWM 출력 (조명 디밍) */
-#define LED_CHANNEL     0            /* LEDC_CHANNEL_0 */
+#define LED_CW_GPIO_PIN GPIO_NUM_8   /* Cool White PWM (LEDC ch0) */
+#define LED_WW_GPIO_PIN GPIO_NUM_9   /* Warm White PWM (LEDC ch1) */
 #define BUTTON_GPIO_PIN GPIO_NUM_28  /* BOOT 버튼, Active LOW (내부/외부 풀업) */
 
+/* esp-matter led_driver 호환용 (단일 채널). 본 프로젝트는 cct_light_get_config 사용 */
 led_driver_config_t led_driver_get_config()
 {
     led_driver_config_t config = {
-        .gpio = LED_GPIO_PIN,
-        .channel = LED_CHANNEL,
-        .output_invert = false,      /* LOW-active 드라이버면 true */
+        .gpio = LED_CW_GPIO_PIN,
+        .channel = 0,
+        .output_invert = false,
+    };
+    return config;
+}
+
+cct_light_config_t cct_light_get_config()
+{
+    cct_light_config_t config = {
+        .cw_gpio = LED_CW_GPIO_PIN,
+        .ww_gpio = LED_WW_GPIO_PIN,
     };
     return config;
 }

@@ -15,23 +15,17 @@
 #include "esp_openthread_types.h"
 #endif
 
-/** Standard max values (used for remapping attributes) */
-#define STANDARD_BRIGHTNESS 100
-#define STANDARD_HUE 360
-#define STANDARD_SATURATION 100
-#define STANDARD_TEMPERATURE_FACTOR 1000000
-
-/** Matter max values (used for remapping attributes) */
+/** Matter max values */
 #define MATTER_BRIGHTNESS 254
-#define MATTER_HUE 254
-#define MATTER_SATURATION 254
-#define MATTER_TEMPERATURE_FACTOR 1000000
+
+/** Color temperature range of the CW/WW fixture (Mired = 1,000,000 / K) */
+#define CCT_MIREDS_MIN 153      /* 6500 K - Cool White 100% */
+#define CCT_MIREDS_MAX 370      /* 2700 K - Warm White 100% */
 
 /** Default attribute values used during initialization */
 #define DEFAULT_POWER true
 #define DEFAULT_BRIGHTNESS 64
-#define DEFAULT_HUE 128
-#define DEFAULT_SATURATION 254
+#define DEFAULT_MIREDS 250      /* 4000 K */
 
 typedef void *app_driver_handle_t;
 

@@ -12,21 +12,29 @@ SmartThings Station. 빌드는 리눅스 빌드 서버(ESP-IDF v6.0.2 + esp-matt
 
 | 기능 | GPIO | 비고 |
 |---|---|---|
-| LED (LEDC PWM) | **GPIO8** | 조명 디밍 출력. LOW-active 드라이버면 `output_invert = true` |
+| **CW (Cool White) PWM** | **GPIO8** | LEDC ch0, 5kHz 13bit |
+| **WW (Warm White) PWM** | **GPIO9** | LEDC ch1 |
 | 버튼 | **GPIO28** | BOOT 핀 겸용, Active LOW. 짧게=토글, 5초=공장초기화 |
 | UART0 | GPIO11(TX)/GPIO12(RX) | 다운로드·콘솔 |
 | USB | GPIO13/14 | USB-Serial-JTAG (선택) |
 
-핀 변경은 `device.c`의 `LED_GPIO_PIN` / `BUTTON_GPIO_PIN`만 수정.
+핀 변경은 `device.c`의 `LED_CW_GPIO_PIN` / `LED_WW_GPIO_PIN` / `BUTTON_GPIO_PIN`만 수정.
 
 **C5 스트래핑 핀 회피 목록**: GPIO25, 26, 27, 28(BOOT), 7(JTAG), IO2(MTMS), IO3(MTDI) —
 이 핀들에 리셋 시 레벨을 바꾸는 회로를 달지 말 것. GPIO16~22는 내부 플래시용(WROOM 미인출).
 
-## 데이터 모델
+## 데이터 모델 — Color Temperature Light (0x010C)
 
-esp-matter light 예제 그대로 — **Extended Color Light** 엔드포인트(On/Off + Level + Color Control).
-WROOM 보드는 단일 PWM이라 색상/색온도 명령은 수신·속성 갱신만 되고 LED 출력엔 밝기만 반영된다.
-실제 CW/WW 2채널 조명으로 가려면 `led_driver` 백엔드를 2채널 LEDC로 확장(또는 UART 출력)하면 된다.
+On/Off + Level Control + Color Control(CT 기능) — ON/OFF·밝기·색온도 조명 제품과 동일한 모델.
+`main/app_driver.cpp`가 세 속성을 CW/WW duty로 렌더링한다:
+
+- 색온도 범위: **153~370 Mired (6500K~2700K)** — `app_priv.h`의 `CCT_MIREDS_MIN/MAX`, 기구 스펙에 맞게 수정
+- Warm 비율 = (mireds − 153) / (370 − 153), CW+WW 합 = 밝기 → 색온도를 바꿔도 광량 일정
+- 시리얼 로그: `light ON level=200 mireds=250 (4000K) -> CW=3545 WW=2905`
+
+esp-matter 기본 `led_driver`(단일 PWM)는 색온도 setter가 `ESP_ERR_NOT_SUPPORTED`를 반환해 속성 쓰기가
+거부되므로 사용하지 않고, LEDC 2채널을 직접 구동한다. UART로 외부 제어기에 넘기는 구조로 바꾸려면
+`cct_render()`만 교체하면 된다.
 
 ## 빌드 (리눅스 빌드 서버)
 

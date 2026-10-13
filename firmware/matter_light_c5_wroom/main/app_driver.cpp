@@ -6,112 +6,68 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 
+/* app_driver.cpp - CW/WW 2채널 LEDC PWM 조명 드라이버 (Color Temperature Light)  */
+/*   OnOff / CurrentLevel / ColorTemperatureMireds → CW·WW duty 로 렌더링          */
+/*   Mired 가 클수록(저 K) Warm 비율↑. CW+WW 합 = 밝기 → 색온도 변화 시 광량 일정  */
+
 #include <esp_log.h>
 #include <stdlib.h>
 
 #include <app_priv.h>
-#include <common_macros.h>
-#include <esp_check.h>
 #include <esp_matter.h>
 
 #include <button_gpio.h>
 #include <device.h>
-#include <led_driver.h>
+#include <driver/ledc.h>
 
 using namespace chip::app::Clusters;
-using namespace chip::app::Clusters::ColorControl::Attributes;
 using namespace esp_matter;
 
 static const char *TAG = "app_driver";
 extern uint16_t light_endpoint_id;
 
-// Global variables to store current XY color coordinates
-static uint16_t current_x = 0;
-static uint16_t current_y = 0;
+#define CCT_LEDC_MODE       LEDC_LOW_SPEED_MODE
+#define CCT_LEDC_TIMER      LEDC_TIMER_0
+#define CCT_LEDC_RES        LEDC_TIMER_13_BIT
+#define CCT_LEDC_DUTY_MAX   ((1u << 13) - 1)
+#define CCT_LEDC_FREQ_HZ    5000
+#define CCT_LEDC_CH_CW      LEDC_CHANNEL_0
+#define CCT_LEDC_CH_WW      LEDC_CHANNEL_1
 
-/* Do any conversions/remapping for the actual value here */
-static esp_err_t app_driver_light_set_power(led_driver_handle_t handle, esp_matter_attr_val_t *val)
+typedef struct {
+    bool     power;
+    uint8_t  level;     /* Matter CurrentLevel 1~254 */
+    uint16_t mireds;    /* Matter ColorTemperatureMireds */
+} cct_light_t;
+
+static cct_light_t s_light = {
+    .power  = DEFAULT_POWER,
+    .level  = DEFAULT_BRIGHTNESS,
+    .mireds = DEFAULT_MIREDS,
+};
+
+static void cct_render(void)
 {
-    return led_driver_set_power(handle, val->val.b);
-}
-
-static esp_err_t app_driver_light_set_brightness(led_driver_handle_t handle, esp_matter_attr_val_t *val)
-{
-    int value = REMAP_TO_RANGE(val->val.u8, MATTER_BRIGHTNESS, STANDARD_BRIGHTNESS);
-    return led_driver_set_brightness(handle, value);
-}
-
-static esp_err_t app_driver_light_set_hue(led_driver_handle_t handle, esp_matter_attr_val_t *val)
-{
-    int value = REMAP_TO_RANGE(val->val.u8, MATTER_HUE, STANDARD_HUE);
-    return led_driver_set_hue(handle, value);
-}
-
-static esp_err_t app_driver_light_set_saturation(led_driver_handle_t handle, esp_matter_attr_val_t *val)
-{
-    int value = REMAP_TO_RANGE(val->val.u8, MATTER_SATURATION, STANDARD_SATURATION);
-    return led_driver_set_saturation(handle, value);
-}
-
-static esp_err_t app_driver_light_set_temperature(led_driver_handle_t handle, esp_matter_attr_val_t *val)
-{
-    uint32_t value = REMAP_TO_RANGE_INVERSE(val->val.u16, STANDARD_TEMPERATURE_FACTOR);
-    return led_driver_set_temperature(handle, value);
-}
-
-static esp_err_t app_driver_light_set_xy(led_driver_handle_t handle, uint16_t x, uint16_t y)
-{
-    return led_driver_set_xy(handle, x, y);
-}
-
-static esp_err_t app_driver_light_apply_color_mode(led_driver_handle_t handle, uint8_t color_mode)
-{
-    esp_err_t err = ESP_OK;
-    esp_matter_attr_val_t val = {};
-
-    switch ((ColorControl::ColorMode)color_mode) {
-    case ColorControl::ColorMode::kCurrentHueAndCurrentSaturation: {
-        err = attribute::get_val(light_endpoint_id, ColorControl::Id, CurrentHue::Id, &val);
-        if (err != ESP_OK) {
-            return err;
-        }
-        err |= app_driver_light_set_hue(handle, &val);
-
-        val = {};
-        err = attribute::get_val(light_endpoint_id, ColorControl::Id, CurrentSaturation::Id, &val);
-        if (err != ESP_OK) {
-            return err;
-        }
-        err |= app_driver_light_set_saturation(handle, &val);
-        return err;
+    uint32_t total = 0;
+    if (s_light.power) {
+        total = (uint32_t)CCT_LEDC_DUTY_MAX * s_light.level / MATTER_BRIGHTNESS;
     }
-    case ColorControl::ColorMode::kColorTemperature: {
-        err = attribute::get_val(light_endpoint_id, ColorControl::Id, ColorTemperatureMireds::Id, &val);
-        if (err != ESP_OK) {
-            return err;
-        }
-        return app_driver_light_set_temperature(handle, &val);
-    }
-    case ColorControl::ColorMode::kCurrentXAndCurrentY: {
-        err = attribute::get_val(light_endpoint_id, ColorControl::Id, CurrentX::Id, &val);
-        if (err != ESP_OK) {
-            return err;
-        }
-        current_x = val.val.u16;
 
-        val = {};
-        err = attribute::get_val(light_endpoint_id, ColorControl::Id, CurrentY::Id, &val);
-        if (err != ESP_OK) {
-            return err;
-        }
-        current_y = val.val.u16;
-        return app_driver_light_set_xy(handle, current_x, current_y);
-    }
-    default: {
-        ESP_LOGE(TAG, "Color mode %u is not supported", color_mode);
-        return ESP_ERR_NOT_SUPPORTED;
-    }
-    }
+    uint16_t m = s_light.mireds;
+    if (m < CCT_MIREDS_MIN) m = CCT_MIREDS_MIN;
+    if (m > CCT_MIREDS_MAX) m = CCT_MIREDS_MAX;
+    uint32_t warm = total * (m - CCT_MIREDS_MIN) / (CCT_MIREDS_MAX - CCT_MIREDS_MIN);
+    uint32_t cool = total - warm;
+
+    ledc_set_duty(CCT_LEDC_MODE, CCT_LEDC_CH_CW, cool);
+    ledc_update_duty(CCT_LEDC_MODE, CCT_LEDC_CH_CW);
+    ledc_set_duty(CCT_LEDC_MODE, CCT_LEDC_CH_WW, warm);
+    ledc_update_duty(CCT_LEDC_MODE, CCT_LEDC_CH_WW);
+
+    ESP_LOGI(TAG, "light %s level=%u mireds=%u (%uK) -> CW=%lu WW=%lu",
+             s_light.power ? "ON " : "OFF", s_light.level, s_light.mireds,
+             s_light.mireds ? 1000000 / s_light.mireds : 0,
+             (unsigned long)cool, (unsigned long)warm);
 }
 
 static void app_driver_button_toggle_cb(void *arg, void *data)
@@ -129,74 +85,84 @@ static void app_driver_button_toggle_cb(void *arg, void *data)
     attribute::update(endpoint_id, cluster_id, attribute_id, &val);
 }
 
+/* 관심 없는 속성(ColorMode 등)은 반드시 ESP_OK 반환 - 에러 반환 시 속성 쓰기가 거부됨 */
 esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_t endpoint_id, uint32_t cluster_id,
                                       uint32_t attribute_id, esp_matter_attr_val_t *val)
 {
-    esp_err_t err = ESP_OK;
-    if (endpoint_id == light_endpoint_id) {
-        led_driver_handle_t handle = (led_driver_handle_t)driver_handle;
-        if (cluster_id == OnOff::Id) {
-            if (attribute_id == OnOff::Attributes::OnOff::Id) {
-                err = app_driver_light_set_power(handle, val);
-            }
-        } else if (cluster_id == LevelControl::Id) {
-            if (attribute_id == LevelControl::Attributes::CurrentLevel::Id) {
-                err = app_driver_light_set_brightness(handle, val);
-            }
-        } else if (cluster_id == ColorControl::Id) {
-            // Reapply cached color attributes because a mode switch may not change
-            // their values.
-            if (attribute_id == ColorControl::Attributes::ColorMode::Id) {
-                err = app_driver_light_apply_color_mode(handle, val->val.u8);
-            } else if (attribute_id == ColorControl::Attributes::CurrentHue::Id) {
-                err = app_driver_light_set_hue(handle, val);
-            } else if (attribute_id == ColorControl::Attributes::CurrentSaturation::Id) {
-                err = app_driver_light_set_saturation(handle, val);
-            } else if (attribute_id == ColorControl::Attributes::ColorTemperatureMireds::Id) {
-                err = app_driver_light_set_temperature(handle, val);
-            } else if (attribute_id == ColorControl::Attributes::CurrentX::Id) {
-                current_x = val->val.u16;
-                err = app_driver_light_set_xy(handle, current_x, current_y);
-            } else if (attribute_id == ColorControl::Attributes::CurrentY::Id) {
-                current_y = val->val.u16;
-                err = app_driver_light_set_xy(handle, current_x, current_y);
-            }
-        }
+    if (endpoint_id != light_endpoint_id) {
+        return ESP_OK;
     }
-    return err;
+    if (cluster_id == OnOff::Id && attribute_id == OnOff::Attributes::OnOff::Id) {
+        s_light.power = val->val.b;
+        cct_render();
+    } else if (cluster_id == LevelControl::Id && attribute_id == LevelControl::Attributes::CurrentLevel::Id) {
+        s_light.level = val->val.u8;
+        cct_render();
+    } else if (cluster_id == ColorControl::Id &&
+               attribute_id == ColorControl::Attributes::ColorTemperatureMireds::Id) {
+        s_light.mireds = val->val.u16;
+        cct_render();
+    }
+    return ESP_OK;
 }
 
 esp_err_t app_driver_light_set_defaults(uint16_t endpoint_id)
 {
-    esp_err_t err = ESP_OK;
-    void *priv_data = endpoint::get_priv_data(endpoint_id);
-    led_driver_handle_t handle = (led_driver_handle_t)priv_data;
     esp_matter_attr_val_t val;
+    attribute_t *attribute;
 
-    /* Setting brightness */
-    attribute_t *attribute = attribute::get(endpoint_id, LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id);
-    attribute::get_val(attribute, &val);
-    err |= app_driver_light_set_brightness(handle, &val);
-
-    /* Setting color */
-    attribute = attribute::get(endpoint_id, ColorControl::Id, ColorControl::Attributes::ColorMode::Id);
-    attribute::get_val(attribute, &val);
-    err |= app_driver_light_apply_color_mode(handle, val.val.u8);
-
-    /* Setting power */
     attribute = attribute::get(endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id);
     attribute::get_val(attribute, &val);
-    err |= app_driver_light_set_power(handle, &val);
+    s_light.power = val.val.b;
 
-    return err;
+    attribute = attribute::get(endpoint_id, LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id);
+    attribute::get_val(attribute, &val);
+    s_light.level = val.val.u8;
+
+    attribute = attribute::get(endpoint_id, ColorControl::Id, ColorControl::Attributes::ColorTemperatureMireds::Id);
+    attribute::get_val(attribute, &val);
+    s_light.mireds = val.val.u16;
+
+    cct_render();
+    return ESP_OK;
 }
 
 app_driver_handle_t app_driver_light_init()
 {
-    /* Initialize led */
-    led_driver_config_t config = led_driver_get_config();
-    led_driver_handle_t handle = led_driver_init(&config);
-    return (app_driver_handle_t)handle;
+    cct_light_config_t pins = cct_light_get_config();
+
+    ledc_timer_config_t timer = {
+        .speed_mode      = CCT_LEDC_MODE,
+        .duty_resolution = CCT_LEDC_RES,
+        .timer_num       = CCT_LEDC_TIMER,
+        .freq_hz         = CCT_LEDC_FREQ_HZ,
+        .clk_cfg         = LEDC_AUTO_CLK,
+    };
+    if (ledc_timer_config(&timer) != ESP_OK) {
+        ESP_LOGE(TAG, "ledc timer config failed");
+        return NULL;
+    }
+
+    const int gpios[2]           = { pins.cw_gpio, pins.ww_gpio };
+    const ledc_channel_t chs[2]  = { CCT_LEDC_CH_CW, CCT_LEDC_CH_WW };
+    for (int i = 0; i < 2; i++) {
+        ledc_channel_config_t ch = {
+            .gpio_num   = gpios[i],
+            .speed_mode = CCT_LEDC_MODE,
+            .channel    = chs[i],
+            .intr_type  = LEDC_INTR_DISABLE,
+            .timer_sel  = CCT_LEDC_TIMER,
+            .duty       = 0,
+            .hpoint     = 0,
+        };
+        if (ledc_channel_config(&ch) != ESP_OK) {
+            ESP_LOGE(TAG, "ledc channel %d config failed (gpio %d)", i, gpios[i]);
+            return NULL;
+        }
+    }
+    ESP_LOGI(TAG, "CW/WW PWM init: CW=GPIO%d WW=GPIO%d, %dHz 13bit",
+             pins.cw_gpio, pins.ww_gpio, CCT_LEDC_FREQ_HZ);
+    return (app_driver_handle_t)&s_light;
 }
 
 app_driver_handle_t app_driver_button_init()
