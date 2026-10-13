@@ -9,3 +9,9 @@ Thumbs.db
 
 # logs
 *.log
+firmware/*/build/
+firmware/*/bin/
+firmware/*/sdkconfig
+firmware/*/sdkconfig.old
+firmware/*/managed_components/
+firmware/*/dependencies.lock
