@@ -21,7 +21,8 @@ chip-tool로 Matter 기기(ESP32-C6 등)를 커미셔닝/제어한다.
 | `docs/Matter_Study_Guide.html` | Matter 전체 사양·아키텍처·커미셔닝·보안·Thread/OTBR·esp-matter 스터디 가이드 |
 | `scripts/run_otbr.sh` | Pi에서 OTBR Docker 컨테이너 실행 (RCP 포트 지정) |
 | `scripts/form_network.sh` | Thread 네트워크 생성 + Active Dataset 추출 |
-| `scripts/commission.sh` | chip-tool로 Matter 기기 BLE-Thread 커미셔닝 + 제어 예시 |
+| `scripts/commission.sh` | chip-tool로 Matter 기기 BLE-Thread 커미셔닝 + 제어 예시 (Pi OTBR 구성) |
+| `scripts/commission_esp_br.sh` | **ESP Thread BR + chip-tool(리눅스)** 커미셔닝·제어 검증 — RA guard 망용 IPv6 수동 설정 포함 (2026-10-19 E2E 성공) |
 
 ## 준비물
 
@@ -77,8 +78,8 @@ idf.py build
 - [x] Matter/Thread 스터디 가이드 (docs)
 - [ ] H2 ot_rcp 플래시 + PocketTerm35 연결
 - [ ] OTBR Docker 기동 + Thread 네트워크 형성
-- [ ] C6 light 예제 커미셔닝 (ble-thread)
-- [ ] onoff/level/colortemp 제어 검증
+- [x] ESP Thread BR(S3+H2) 가동 → C5-WROOM light 커미셔닝 (ble-thread, chip-tool snap)
+- [x] onoff/level/colortemp 제어 검증 (CW/WW PWM 반영 확인)
 - [ ] attribute 콜백 → UART 출력 PoC (게이트웨이 연동)
 - [ ] PocketTerm35 게이트웨이 앱(FastAPI)에 Thread 기기 상태 표시 통합
 
