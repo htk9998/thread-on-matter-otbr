@@ -14,6 +14,7 @@ SmartThings Station. 빌드는 리눅스 빌드 서버(ESP-IDF v6.0.2 + esp-matt
 |---|---|---|
 | **CW (Cool White) PWM** | **GPIO8** | LEDC ch0, 5kHz 13bit |
 | **WW (Warm White) PWM** | **GPIO9** | LEDC ch1 |
+| 온보드 RGB (WS2812) | **GPIO27** | C5-DevKitC-1 표시용 — 색온도(쿨↔웜 블렌드)×밝기, OFF=소등. 양산 WROOM 보드는 `device.c`에서 -1 |
 | 버튼 | **GPIO28** | BOOT 핀 겸용, Active LOW. 짧게=토글, 5초=공장초기화 |
 | UART0 | GPIO11(TX)/GPIO12(RX) | 다운로드·콘솔 |
 | USB | GPIO13/14 | USB-Serial-JTAG (선택) |

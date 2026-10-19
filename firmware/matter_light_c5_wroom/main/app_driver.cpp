@@ -19,6 +19,7 @@
 #include <button_gpio.h>
 #include <device.h>
 #include <driver/ledc.h>
+#include <led_strip.h>
 
 using namespace chip::app::Clusters;
 using namespace esp_matter;
@@ -39,6 +40,8 @@ typedef struct {
     uint8_t  level;     /* Matter CurrentLevel 1~254 */
     uint16_t mireds;    /* Matter ColorTemperatureMireds */
 } cct_light_t;
+
+static led_strip_handle_t s_strip = NULL;   /* 온보드 WS2812 (옵션) */
 
 static cct_light_t s_light = {
     .power  = DEFAULT_POWER,
@@ -63,6 +66,18 @@ static void cct_render(void)
     ledc_update_duty(CCT_LEDC_MODE, CCT_LEDC_CH_CW);
     ledc_set_duty(CCT_LEDC_MODE, CCT_LEDC_CH_WW, warm);
     ledc_update_duty(CCT_LEDC_MODE, CCT_LEDC_CH_WW);
+
+    /* 온보드 RGB: 색온도를 쿨(201,226,255)~웜(255,147,41) 사이 블렌드, 밝기 스케일 */
+    if (s_strip) {
+        uint32_t t = CCT_MIREDS_MAX - CCT_MIREDS_MIN;           /* 0..t: warm 비율 */
+        uint32_t w = m - CCT_MIREDS_MIN;
+        uint32_t lv = s_light.power ? s_light.level : 0;
+        uint32_t r = (201 * (t - w) + 255 * w) / t * lv / MATTER_BRIGHTNESS;
+        uint32_t g = (226 * (t - w) + 147 * w) / t * lv / MATTER_BRIGHTNESS;
+        uint32_t b = (255 * (t - w) + 41  * w) / t * lv / MATTER_BRIGHTNESS;
+        led_strip_set_pixel(s_strip, 0, r, g, b);
+        led_strip_refresh(s_strip);
+    }
 
     ESP_LOGI(TAG, "light %s level=%u mireds=%u (%uK) -> CW=%lu WW=%lu",
              s_light.power ? "ON " : "OFF", s_light.level, s_light.mireds,
@@ -158,6 +173,22 @@ app_driver_handle_t app_driver_light_init()
         if (ledc_channel_config(&ch) != ESP_OK) {
             ESP_LOGE(TAG, "ledc channel %d config failed (gpio %d)", i, gpios[i]);
             return NULL;
+        }
+    }
+    if (pins.rgb_gpio >= 0) {
+        led_strip_config_t strip_cfg = {
+            .strip_gpio_num = pins.rgb_gpio,
+            .max_leds = 1,
+        };
+        strip_cfg.led_model = LED_MODEL_WS2812;
+        led_strip_rmt_config_t rmt_cfg = {};
+        rmt_cfg.resolution_hz = 10 * 1000 * 1000;
+        if (led_strip_new_rmt_device(&strip_cfg, &rmt_cfg, &s_strip) == ESP_OK) {
+            led_strip_clear(s_strip);
+            ESP_LOGI(TAG, "onboard RGB init: GPIO%d (WS2812)", pins.rgb_gpio);
+        } else {
+            ESP_LOGW(TAG, "onboard RGB init failed (GPIO%d)", pins.rgb_gpio);
+            s_strip = NULL;
         }
     }
     ESP_LOGI(TAG, "CW/WW PWM init: CW=GPIO%d WW=GPIO%d, %dHz 13bit",
