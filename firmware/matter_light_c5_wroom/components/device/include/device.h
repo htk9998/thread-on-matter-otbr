@@ -13,7 +13,9 @@ extern "C" {
 typedef struct {
     int cw_gpio;    /* Cool White PWM 출력 */
     int ww_gpio;    /* Warm White PWM 출력 */
-    int rgb_gpio;   /* 온보드 WS2812 RGB (DevKit 표시용, -1 = 없음) */
+    int rgb_gpio;   /* 온보드 WS2812 RGB — EP2 Extended Color Light (-1 = 없음) */
+    int onoff_gpio; /* EP3 On/Off Light 디지털 출력 */
+    int dim_gpio;   /* EP4 Dimmable Light PWM 출력 */
 } cct_light_config_t;
 
 led_driver_config_t  led_driver_get_config();

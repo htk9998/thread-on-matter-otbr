@@ -29,6 +29,12 @@
 
 typedef void *app_driver_handle_t;
 
+/* 4개 엔드포인트 ID (app_main 이 생성 후 기록) */
+extern uint16_t ep_cct_id;      /* EP1 0x010C Color Temperature Light - CW/WW PWM */
+extern uint16_t ep_ext_id;      /* EP2 0x010D Extended Color Light   - 온보드 RGB  */
+extern uint16_t ep_onoff_id;    /* EP3 0x0100 On/Off Light           - GPIO 디지털 */
+extern uint16_t ep_dim_id;      /* EP4 0x0101 Dimmable Light         - 단일 PWM    */
+
 /** Initialize the light driver
  *
  * This initializes the light driver associated with the selected board.

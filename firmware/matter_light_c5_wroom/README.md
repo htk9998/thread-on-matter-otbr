@@ -12,9 +12,11 @@ SmartThings Station. 빌드는 리눅스 빌드 서버(ESP-IDF v6.0.2 + esp-matt
 
 | 기능 | GPIO | 비고 |
 |---|---|---|
-| **CW (Cool White) PWM** | **GPIO8** | LEDC ch0, 5kHz 13bit |
-| **WW (Warm White) PWM** | **GPIO9** | LEDC ch1 |
-| 온보드 RGB (WS2812) | **GPIO27** | C5-DevKitC-1 표시용 — 색온도(쿨↔웜 블렌드)×밝기, OFF=소등. 양산 WROOM 보드는 `device.c`에서 -1 |
+| EP1 CW PWM | **GPIO8** | 0x010C Color Temperature Light, LEDC ch0 |
+| EP1 WW PWM | **GPIO9** | LEDC ch1 |
+| EP2 온보드 RGB (WS2812) | **GPIO27** | 0x010D Extended Color Light — HSV/XY 풀컬러 + 색온도 모드. 양산 WROOM 보드는 -1 |
+| EP3 On/Off 출력 | **GPIO10** | 0x0100 On/Off Light, 디지털 |
+| EP4 Dimmable PWM | **GPIO6** | 0x0101 Dimmable Light, LEDC ch2 |
 | 버튼 | **GPIO28** | BOOT 핀 겸용, Active LOW. 짧게=토글, 5초=공장초기화 |
 | UART0 | GPIO11(TX)/GPIO12(RX) | 다운로드·콘솔 |
 | USB | GPIO13/14 | USB-Serial-JTAG (선택) |
@@ -24,7 +26,19 @@ SmartThings Station. 빌드는 리눅스 빌드 서버(ESP-IDF v6.0.2 + esp-matt
 **C5 스트래핑 핀 회피 목록**: GPIO25, 26, 27, 28(BOOT), 7(JTAG), IO2(MTMS), IO3(MTDI) —
 이 핀들에 리셋 시 레벨을 바꾸는 회로를 달지 말 것. GPIO16~22는 내부 플래시용(WROOM 미인출).
 
-## 데이터 모델 — Color Temperature Light (0x010C)
+## 데이터 모델 — 복합 기기 (엔드포인트 4개)
+
+| EP | Device Type | 클러스터 | 출력 |
+|---|---|---|---|
+| 1 | 0x010C Color Temperature Light | OnOff + Level + ColorControl(CT) | CW/WW PWM |
+| 2 | 0x010D Extended Color Light | OnOff + Level + ColorControl(HS/XY/CT) | 온보드 RGB |
+| 3 | 0x0100 On/Off Light | OnOff | GPIO10 |
+| 4 | 0x0101 Dimmable Light | OnOff + Level | GPIO6 PWM |
+
+`CONFIG_ESP_MATTER_MAX_DYNAMIC_ENDPOINT_COUNT=5`. 생태계 앱에는 한 기기 안의 조명 4개(컴포넌트)로 표시된다.
+엔드포인트 구성을 바꾼 뒤에는 기존 등록(Fabric)에서 새 EP가 바로 안 보일 수 있으므로 공장초기화 후 재커미셔닝 권장.
+
+### EP1 상세 — Color Temperature Light (0x010C)
 
 On/Off + Level Control + Color Control(CT 기능) — ON/OFF·밝기·색온도 조명 제품과 동일한 모델.
 `main/app_driver.cpp`가 세 속성을 CW/WW duty로 렌더링한다:

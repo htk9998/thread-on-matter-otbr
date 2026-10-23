@@ -11,6 +11,8 @@
 #define LED_WW_GPIO_PIN GPIO_NUM_9   /* Warm White PWM (LEDC ch1) */
 #define BUTTON_GPIO_PIN GPIO_NUM_28  /* BOOT 버튼, Active LOW (내부/외부 풀업) */
 #define LED_RGB_GPIO_PIN GPIO_NUM_27 /* C5-DevKitC-1 온보드 WS2812 (양산 WROOM 보드면 -1) */
+#define LED_ONOFF_GPIO_PIN GPIO_NUM_10 /* EP3 On/Off Light */
+#define LED_DIM_GPIO_PIN  GPIO_NUM_6   /* EP4 Dimmable Light PWM (LEDC ch2) */
 
 /* esp-matter led_driver 호환용 (단일 채널). 본 프로젝트는 cct_light_get_config 사용 */
 led_driver_config_t led_driver_get_config()
@@ -29,6 +31,8 @@ cct_light_config_t cct_light_get_config()
         .cw_gpio = LED_CW_GPIO_PIN,
         .ww_gpio = LED_WW_GPIO_PIN,
         .rgb_gpio = LED_RGB_GPIO_PIN,
+        .onoff_gpio = LED_ONOFF_GPIO_PIN,
+        .dim_gpio = LED_DIM_GPIO_PIN,
     };
     return config;
 }

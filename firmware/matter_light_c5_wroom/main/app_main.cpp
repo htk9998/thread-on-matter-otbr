@@ -39,7 +39,8 @@ using namespace chip::DeviceLayer;
 #endif
 
 static const char *TAG = "app_main";
-uint16_t light_endpoint_id = 0;
+uint16_t light_endpoint_id = 0;   /* = EP1 (호환용) */
+uint16_t ep_cct_id = 0, ep_ext_id = 0, ep_onoff_id = 0, ep_dim_id = 0;
 
 using namespace esp_matter;
 using namespace esp_matter::attribute;
@@ -186,34 +187,75 @@ extern "C" void app_main()
 
     MEMORY_PROFILER_DUMP_HEAP_STAT("node created");
 
-    /* Color Temperature Light (0x010C): On/Off + Level + Color Control(CT) - CW/WW 2채널 PWM */
-    color_temperature_light::config_t light_config;
-    light_config.on_off.on_off = DEFAULT_POWER;
-    light_config.on_off_lighting.start_up_on_off = nullptr;
-    light_config.level_control.current_level = DEFAULT_BRIGHTNESS;
-    light_config.level_control.on_level = DEFAULT_BRIGHTNESS;
-    light_config.level_control_lighting.start_up_current_level = DEFAULT_BRIGHTNESS;
-    light_config.color_control.color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
-    light_config.color_control.enhanced_color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
-    light_config.color_control_color_temperature.color_temperature_mireds = DEFAULT_MIREDS;
-    light_config.color_control_color_temperature.color_temp_physical_min_mireds = CCT_MIREDS_MIN;
-    light_config.color_control_color_temperature.color_temp_physical_max_mireds = CCT_MIREDS_MAX;
-    light_config.color_control_color_temperature.couple_color_temp_to_level_min_mireds = CCT_MIREDS_MIN;
-    light_config.color_control_color_temperature.start_up_color_temperature_mireds = nullptr;
+    /* ── EP1: Color Temperature Light (0x010C) — CW/WW 2채널 PWM ── */
+    color_temperature_light::config_t cct_cfg;
+    cct_cfg.on_off.on_off = DEFAULT_POWER;
+    cct_cfg.on_off_lighting.start_up_on_off = nullptr;
+    cct_cfg.level_control.current_level = DEFAULT_BRIGHTNESS;
+    cct_cfg.level_control.on_level = DEFAULT_BRIGHTNESS;
+    cct_cfg.level_control_lighting.start_up_current_level = DEFAULT_BRIGHTNESS;
+    cct_cfg.color_control.color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
+    cct_cfg.color_control.enhanced_color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
+    cct_cfg.color_control_color_temperature.color_temperature_mireds = DEFAULT_MIREDS;
+    cct_cfg.color_control_color_temperature.color_temp_physical_min_mireds = CCT_MIREDS_MIN;
+    cct_cfg.color_control_color_temperature.color_temp_physical_max_mireds = CCT_MIREDS_MAX;
+    cct_cfg.color_control_color_temperature.couple_color_temp_to_level_min_mireds = CCT_MIREDS_MIN;
+    cct_cfg.color_control_color_temperature.start_up_color_temperature_mireds = nullptr;
+    endpoint_t *endpoint = color_temperature_light::create(node, &cct_cfg, ENDPOINT_FLAG_NONE, light_handle);
+    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create EP1 color temperature light"));
+    ep_cct_id = light_endpoint_id = endpoint::get_id(endpoint);
 
-    // endpoint handles can be used to add/modify clusters.
-    endpoint_t *endpoint = color_temperature_light::create(node, &light_config, ENDPOINT_FLAG_NONE, light_handle);
-    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create color temperature light endpoint"));
+    /* ── EP2: Extended Color Light (0x010D) — 온보드 RGB (HSV/XY/CT) ── */
+    extended_color_light::config_t ext_cfg;
+    ext_cfg.on_off.on_off = DEFAULT_POWER;
+    ext_cfg.on_off_lighting.start_up_on_off = nullptr;
+    ext_cfg.level_control.current_level = DEFAULT_BRIGHTNESS;
+    ext_cfg.level_control.on_level = DEFAULT_BRIGHTNESS;
+    ext_cfg.level_control_lighting.start_up_current_level = DEFAULT_BRIGHTNESS;
+    ext_cfg.color_control.color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
+    ext_cfg.color_control.enhanced_color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
+    ext_cfg.color_control_color_temperature.color_temperature_mireds = DEFAULT_MIREDS;
+    ext_cfg.color_control_color_temperature.color_temp_physical_min_mireds = CCT_MIREDS_MIN;
+    ext_cfg.color_control_color_temperature.color_temp_physical_max_mireds = CCT_MIREDS_MAX;
+    ext_cfg.color_control_color_temperature.couple_color_temp_to_level_min_mireds = CCT_MIREDS_MIN;
+    ext_cfg.color_control_color_temperature.start_up_color_temperature_mireds = nullptr;
+    endpoint = extended_color_light::create(node, &ext_cfg, ENDPOINT_FLAG_NONE, light_handle);
+    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create EP2 extended color light"));
+    ep_ext_id = endpoint::get_id(endpoint);
 
-    light_endpoint_id = endpoint::get_id(endpoint);
-    ESP_LOGI(TAG, "Light created with endpoint_id %d", light_endpoint_id);
+    /* ── EP3: On/Off Light (0x0100) — GPIO 디지털 ── */
+    on_off_light::config_t onoff_cfg;
+    onoff_cfg.on_off.on_off = false;
+    onoff_cfg.on_off_lighting.start_up_on_off = nullptr;
+    endpoint = on_off_light::create(node, &onoff_cfg, ENDPOINT_FLAG_NONE, light_handle);
+    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create EP3 on/off light"));
+    ep_onoff_id = endpoint::get_id(endpoint);
 
-    /* Mark deferred persistence for some attributes that might be changed rapidly */
-    attribute_t *current_level_attribute = attribute::get(light_endpoint_id, LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id);
-    attribute::set_deferred_persistence(current_level_attribute);
+    /* ── EP4: Dimmable Light (0x0101) — 단일 PWM ── */
+    dimmable_light::config_t dim_cfg;
+    dim_cfg.on_off.on_off = false;
+    dim_cfg.on_off_lighting.start_up_on_off = nullptr;
+    dim_cfg.level_control.current_level = DEFAULT_BRIGHTNESS;
+    dim_cfg.level_control.on_level = DEFAULT_BRIGHTNESS;
+    dim_cfg.level_control_lighting.start_up_current_level = DEFAULT_BRIGHTNESS;
+    endpoint = dimmable_light::create(node, &dim_cfg, ENDPOINT_FLAG_NONE, light_handle);
+    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create EP4 dimmable light"));
+    ep_dim_id = endpoint::get_id(endpoint);
 
-    attribute_t *color_temp_attribute = attribute::get(light_endpoint_id, ColorControl::Id, ColorControl::Attributes::ColorTemperatureMireds::Id);
-    attribute::set_deferred_persistence(color_temp_attribute);
+    ESP_LOGI(TAG, "Endpoints: EP%u=0x010C CCT, EP%u=0x010D ExtColor, EP%u=0x0100 OnOff, EP%u=0x0101 Dimmable",
+             ep_cct_id, ep_ext_id, ep_onoff_id, ep_dim_id);
+
+    /* 빠르게 바뀌는 속성은 지연 저장 */
+    for (uint16_t ep : { ep_cct_id, ep_ext_id, ep_dim_id }) {
+        attribute::set_deferred_persistence(attribute::get(ep, LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id));
+    }
+    for (uint16_t ep : { ep_cct_id, ep_ext_id }) {
+        attribute::set_deferred_persistence(attribute::get(ep, ColorControl::Id, ColorControl::Attributes::ColorTemperatureMireds::Id));
+    }
+    attribute::set_deferred_persistence(attribute::get(ep_ext_id, ColorControl::Id, ColorControl::Attributes::CurrentHue::Id));
+    attribute::set_deferred_persistence(attribute::get(ep_ext_id, ColorControl::Id, ColorControl::Attributes::CurrentSaturation::Id));
+    attribute::set_deferred_persistence(attribute::get(ep_ext_id, ColorControl::Id, ColorControl::Attributes::CurrentX::Id));
+    attribute::set_deferred_persistence(attribute::get(ep_ext_id, ColorControl::Id, ColorControl::Attributes::CurrentY::Id));
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD && CHIP_DEVICE_CONFIG_ENABLE_WIFI_STATION
     // Enable secondary network interface
@@ -251,7 +293,7 @@ extern "C" void app_main()
     MEMORY_PROFILER_DUMP_HEAP_STAT("matter started");
 
     /* Starting driver with default values */
-    app_driver_light_set_defaults(light_endpoint_id);
+    app_driver_light_set_defaults(0);   /* 4개 EP 전부 초기 렌더링 */
 
 #if CONFIG_ENABLE_ENCRYPTED_OTA
     err = esp_matter_ota_requestor_encrypted_init(s_decryption_key, s_decryption_key_len);
